@@ -278,7 +278,7 @@ export default function Home() {
                   Ready to Forge Your Brand Extension?
                 </h3>
                 <p className="text-gray-600 dark:text-gray-400">
-                  Fill in the brand details on the left and click "Forge Extension Strategy" to generate AI-powered insights.
+                  Fill in the brand details on the left and click &ldquo;Forge Extension Strategy&rdquo; to generate AI-powered insights.
                 </p>
               </div>
             )}
