@@ -18,83 +18,42 @@ import {
   ArrowRight
 } from 'lucide-react';
 import type { BrandExtensionResponse, ApiErrorResponse } from '@/types/brand-extension';
-import { generateLogoDataUri, generateAiLogoUrl, generateRealLogoUrl } from '@/lib/logo-generator';
+import { generateLogoDataUri } from '@/lib/logo-generator';
 
 type TabType = 'overview' | 'swot' | 'aida' | 'persona';
 
 export default function Home() {
   const [currentBrand, setCurrentBrand] = useState('');
-  const [brandWebsite, setBrandWebsite] = useState('');
   const [coreStrength, setCoreStrength] = useState('');
   const [targetCategory, setTargetCategory] = useState('');
+  const [customInstructions, setCustomInstructions] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<BrandExtensionResponse | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [currentBrandLogo, setCurrentBrandLogo] = useState<string | null>(null);
-  const [extensionLogo, setExtensionLogo] = useState<string | null>(null);
-  const [logosLoading, setLogosLoading] = useState(false);
-  const [logoError, setLogoError] = useState<string | null>(null);
   const [currentBrandName, setCurrentBrandName] = useState('');
-  const [extensionName, setExtensionName] = useState('');
 
-  const generateLogos = async (
-    brandName: string,
-    extName: string,
-    strength: string,
-    category: string,
-    website: string
-  ) => {
-    setLogosLoading(true);
-    setLogoError(null);
+  const generateLogos = async (brandName: string, strength: string, category: string) => {
     setCurrentBrandName(brandName);
-    setExtensionName(extName);
+    // Show the instant gradient badge immediately, then try to upgrade to a real
+    // AI-generated logo in the background. If that fails (e.g. billing/balance
+    // issue), the badge already showing stays as a graceful fallback.
+    setCurrentBrandLogo(generateLogoDataUri(brandName));
 
     try {
-      // If the user didn't manually specify a website, try to auto-resolve
-      // the brand's real logo/domain via Wikidata (free, no key needed).
-      let resolvedLogoImageUrl: string | null = null;
-      let resolvedWebsite = website;
-
-      if (!resolvedWebsite.trim()) {
-        try {
-          const resolveRes = await fetch('/api/resolve-domain', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ brandName }),
-          });
-          const resolveData = await resolveRes.json();
-          if (resolveData?.logoImageUrl) {
-            resolvedLogoImageUrl = resolveData.logoImageUrl;
-          } else if (resolveData?.domain) {
-            resolvedWebsite = resolveData.domain;
-          }
-        } catch {
-          // Silently fall through to the guessed-domain / gradient badge fallback
-        }
+      const res = await fetch('/api/generate-logo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brandName, coreStrength: strength, category }),
+      });
+      const data = await res.json();
+      if (res.ok && data.image) {
+        setCurrentBrandLogo(`data:image/png;base64,${data.image}`);
       }
-
-      // Priority: direct Wikidata logo image > Hunter.io domain-based lookup > gradient badge (via onError)
-      setCurrentBrandLogo(
-        resolvedLogoImageUrl || generateRealLogoUrl(brandName, resolvedWebsite)
-      );
-
-      // The extension is a brand-new, fictional product line - AI-generate an icon for it.
-      // Falls back to the offline gradient badge (via onError) if generation fails.
-      setExtensionLogo(generateAiLogoUrl(extName, strength, category, true));
-    } catch (err: any) {
-      setLogoError(err.message || 'An unexpected error occurred while generating logos');
-    } finally {
-      setLogosLoading(false);
+    } catch {
+      // Silently keep the gradient badge already showing
     }
-  };
-
-  const handleCurrentLogoError = () => {
-    setCurrentBrandLogo(generateLogoDataUri(currentBrandName));
-  };
-
-  const handleExtensionLogoError = () => {
-    setExtensionLogo(generateLogoDataUri(extensionName));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -103,8 +62,6 @@ export default function Home() {
     setError(null);
     setResult(null);
     setCurrentBrandLogo(null);
-    setExtensionLogo(null);
-    setLogoError(null);
 
     try {
       const response = await fetch('/api/generate', {
@@ -116,6 +73,7 @@ export default function Home() {
           currentBrand,
           coreStrength,
           targetCategory,
+          customInstructions,
         }),
       });
 
@@ -130,7 +88,7 @@ export default function Home() {
       setActiveTab('overview');
 
       // Kick off logo generation in the background; it doesn't block the main result
-      generateLogos(currentBrand, data.data.brandExtensionName, coreStrength, targetCategory, brandWebsite);
+      generateLogos(currentBrand, coreStrength, targetCategory);
     } catch (err: any) {
       setError(err.message || 'An unexpected error occurred');
     } finally {
@@ -188,22 +146,6 @@ export default function Home() {
                   />
                 </div>
 
-                {/* Brand Website (optional, improves logo accuracy) */}
-                <div>
-                  <label htmlFor="brandWebsite" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Brand Website <span className="text-gray-400 font-normal">(optional - auto-detected if left blank)</span>
-                  </label>
-                  <input
-                    type="text"
-                    id="brandWebsite"
-                    value={brandWebsite}
-                    onChange={(e) => setBrandWebsite(e.target.value)}
-                    placeholder="e.g., mrftyres.com"
-                    className="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-slate-700 dark:text-white transition-all"
-                    disabled={loading}
-                  />
-                </div>
-
                 {/* Brand Core Strengths */}
                 <div>
                   <label htmlFor="coreStrength" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -232,6 +174,22 @@ export default function Home() {
                     onChange={(e) => setTargetCategory(e.target.value)}
                     placeholder="e.g., Energy Bars or Energy Drinks"
                     className="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-slate-700 dark:text-white transition-all"
+                    disabled={loading}
+                  />
+                </div>
+
+                {/* Custom Instructions / Suggestions */}
+                <div>
+                  <label htmlFor="customInstructions" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Additional Instructions <span className="text-gray-400 font-normal">(optional)</span>
+                  </label>
+                  <textarea
+                    id="customInstructions"
+                    value={customInstructions}
+                    onChange={(e) => setCustomInstructions(e.target.value)}
+                    placeholder="e.g., focus on Gen Z appeal, keep it budget-friendly, avoid dairy, emphasize sustainability..."
+                    rows={3}
+                    className="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-slate-700 dark:text-white transition-all resize-none"
                     disabled={loading}
                   />
                 </div>
@@ -352,66 +310,21 @@ export default function Home() {
                         </p>
                       </div>
 
-                      {/* Logos */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-6 border border-gray-200 dark:border-gray-700 text-center">
-                          <h4 className="font-semibold text-gray-900 dark:text-white mb-4">
+                      {/* Logo */}
+                      <div className="flex justify-center">
+                        <div className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-8 border border-gray-200 dark:border-gray-700 text-center inline-block">
+                          <h4 className="font-semibold text-gray-900 dark:text-white mb-4 text-lg">
                             {result.metadata.brand} Logo
                           </h4>
-                          {logosLoading && !currentBrandLogo && (
-                            <div className="w-48 h-48 mx-auto flex items-center justify-center bg-white dark:bg-slate-800 rounded-lg">
-                              <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
-                            </div>
-                          )}
                           {currentBrandLogo && (
                             <img
                               src={currentBrandLogo}
                               alt={`${result.metadata.brand} logo`}
-                              onError={handleCurrentLogoError}
-                              className="w-48 h-48 mx-auto rounded-lg object-contain bg-white"
+                              className="w-80 h-80 mx-auto rounded-lg object-contain bg-white p-4"
                             />
-                          )}
-                          {!logosLoading && !currentBrandLogo && !logoError && (
-                            <div className="w-48 h-48 mx-auto flex items-center justify-center bg-white dark:bg-slate-800 rounded-lg text-gray-400 text-sm">
-                              No logo yet
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-6 border border-gray-200 dark:border-gray-700 text-center">
-                          <h4 className="font-semibold text-gray-900 dark:text-white mb-4">
-                            {result.data.brandExtensionName} Logo
-                          </h4>
-                          {logosLoading && !extensionLogo && (
-                            <div className="w-48 h-48 mx-auto flex items-center justify-center bg-white dark:bg-slate-800 rounded-lg">
-                              <Loader2 className="w-8 h-8 text-purple-600 animate-spin" />
-                            </div>
-                          )}
-                          {extensionLogo && (
-                            <img
-                              src={extensionLogo}
-                              alt={`${result.data.brandExtensionName} logo`}
-                              onError={handleExtensionLogoError}
-                              className="w-48 h-48 mx-auto rounded-lg object-contain bg-white"
-                            />
-                          )}
-                          {!logosLoading && !extensionLogo && !logoError && (
-                            <div className="w-48 h-48 mx-auto flex items-center justify-center bg-white dark:bg-slate-800 rounded-lg text-gray-400 text-sm">
-                              No logo yet
-                            </div>
                           )}
                         </div>
                       </div>
-
-                      {logoError && (
-                        <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-start space-x-3">
-                          <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
-                          <div>
-                            <p className="text-sm font-medium text-red-800 dark:text-red-300">Logo Generation Error</p>
-                            <p className="text-sm text-red-700 dark:text-red-400 mt-1">{logoError}</p>
-                          </div>
-                        </div>
-                      )}
 
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 border border-blue-200 dark:border-blue-800">
