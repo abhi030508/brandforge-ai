@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState } from 'react';
 import { 
@@ -18,7 +18,6 @@ import {
   ArrowRight
 } from 'lucide-react';
 import type { BrandExtensionResponse, ApiErrorResponse } from '@/types/brand-extension';
-import { generateLogoDataUri } from '@/lib/logo-generator';
 
 type TabType = 'overview' | 'swot' | 'aida' | 'persona';
 
@@ -31,37 +30,12 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<BrandExtensionResponse | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('overview');
-  const [currentBrandLogo, setCurrentBrandLogo] = useState<string | null>(null);
-  const [currentBrandName, setCurrentBrandName] = useState('');
-
-  const generateLogos = async (brandName: string, strength: string, category: string) => {
-    setCurrentBrandName(brandName);
-    // Show the instant gradient badge immediately, then try to upgrade to a real
-    // AI-generated logo in the background. If that fails (e.g. billing/balance
-    // issue), the badge already showing stays as a graceful fallback.
-    setCurrentBrandLogo(generateLogoDataUri(brandName));
-
-    try {
-      const res = await fetch('/api/generate-logo', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ brandName, coreStrength: strength, category }),
-      });
-      const data = await res.json();
-      if (res.ok && data.image) {
-        setCurrentBrandLogo(`data:image/png;base64,${data.image}`);
-      }
-    } catch {
-      // Silently keep the gradient badge already showing
-    }
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
     setResult(null);
-    setCurrentBrandLogo(null);
 
     try {
       const response = await fetch('/api/generate', {
@@ -86,9 +60,6 @@ export default function Home() {
 
       setResult(data as BrandExtensionResponse);
       setActiveTab('overview');
-
-      // Kick off logo generation in the background; it doesn't block the main result
-      generateLogos(currentBrand, coreStrength, targetCategory);
     } catch (err: any) {
       setError(err.message || 'An unexpected error occurred');
     } finally {
@@ -308,22 +279,6 @@ export default function Home() {
                         <p className="text-lg text-gray-600 dark:text-gray-400">
                           Brand Extension for {result.metadata.brand}
                         </p>
-                      </div>
-
-                      {/* Logo */}
-                      <div className="flex justify-center">
-                        <div className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-8 border border-gray-200 dark:border-gray-700 text-center inline-block">
-                          <h4 className="font-semibold text-gray-900 dark:text-white mb-4 text-lg">
-                            {result.metadata.brand} Logo
-                          </h4>
-                          {currentBrandLogo && (
-                            <img
-                              src={currentBrandLogo}
-                              alt={`${result.metadata.brand} logo`}
-                              className="w-80 h-80 mx-auto rounded-lg object-contain bg-white p-4"
-                            />
-                          )}
-                        </div>
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -575,5 +530,3 @@ export default function Home() {
     </div>
   );
 }
-
-// Made with Bob
