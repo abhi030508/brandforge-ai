@@ -1,16 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { WatsonxAI } from '@langchain/community/llms/watsonx_ai';
-import { PromptTemplate } from '@langchain/core/prompts';
-import { JsonOutputParser } from '@langchain/core/output_parsers';
-import type { BrandExtensionOutput, BrandExtensionRequest } from '@/types/brand-extension';
+﻿import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(request: NextRequest) {
   try {
-    // Parse request body
     const body = await request.json();
-    const { currentBrand, coreStrength, targetCategory } = body;
+    const { currentBrand, coreStrength, targetCategory, customInstructions } = body;
 
-    // Validate input
     if (!currentBrand || !coreStrength || !targetCategory) {
       return NextResponse.json(
         {
@@ -21,135 +15,91 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate watsonx.ai configuration
-    if (!process.env.WATSONX_API_KEY) {
+    if (!process.env.GROQ_API_KEY) {
       return NextResponse.json(
         {
           error: 'Configuration Error',
-          details: 'WATSONX_API_KEY is not configured. Please set it in environment variables.',
+          details: 'GROQ_API_KEY is not configured. Please set it in environment variables.',
         },
         { status: 500 }
       );
     }
 
-    if (!process.env.WATSONX_PROJECT_ID) {
-      return NextResponse.json(
-        {
-          error: 'Configuration Error',
-          details: 'WATSONX_PROJECT_ID is not configured. Please set it in environment variables.',
-        },
-        { status: 500 }
-      );
-    }
+    const systemPrompt = `You are an elite corporate marketing strategist with 20+ years of experience in brand extension and market positioning. Your expertise lies in creating data-driven, innovative brand strategies that resonate with target audiences.
 
-    // Initialize IBM watsonx.ai with Granite model
-    const model = new WatsonxAI({
-      ibmCloudApiKey: process.env.WATSONX_API_KEY,
-      projectId: process.env.WATSONX_PROJECT_ID,
-      modelId: 'ibm/granite-4-h-small',
-      modelParameters: {
-        max_new_tokens: 2000,
-        temperature: 0.7,
-        top_p: 1,
-        top_k: 50,
-      },
-    });
-
-    // Create a structured prompt template
-    const promptTemplate = PromptTemplate.fromTemplate(`
-You are an elite corporate marketing strategist with 20+ years of experience in brand extension and market positioning. Your expertise lies in creating data-driven, innovative brand strategies that resonate with target audiences.
-
-TASK: Develop a comprehensive brand extension strategy for the following:
-
-Current Brand: {currentBrand}
-Core Strengths: {coreStrength}
-Target Category: {targetCategory}
-
-INSTRUCTIONS:
-1. Analyze the brand's core strengths and how they translate to the new category
-2. Create a compelling brand extension name that maintains brand equity
-3. Conduct a thorough SWOT analysis specific to this extension
-4. Develop an AIDA framework for market entry
-5. Define the target persona with precision
-
-OUTPUT FORMAT (STRICT JSON):
-{{
+Return ONLY valid JSON matching this exact structure, with no markdown formatting, no code fences, and no explanatory text before or after:
+{
   "brandExtensionName": "A catchy, memorable name that connects to the parent brand",
-  "swotAnalysis": {{
+  "swotAnalysis": {
     "strengths": ["strength 1", "strength 2", "strength 3"],
     "weaknesses": ["weakness 1", "weakness 2", "weakness 3"],
     "opportunities": ["opportunity 1", "opportunity 2", "opportunity 3"],
     "threats": ["threat 1", "threat 2", "threat 3"]
-  }},
-  "aidaFramework": {{
+  },
+  "aidaFramework": {
     "attention": "Strategy to grab attention (2-3 sentences)",
     "interest": "Strategy to build interest (2-3 sentences)",
     "desire": "Strategy to create desire (2-3 sentences)",
     "action": "Strategy to drive action (2-3 sentences)"
-  }},
-  "targetPersona": {{
+  },
+  "targetPersona": {
     "demographics": "Age, gender, income, location, education",
     "psychographics": "Lifestyle, values, interests, attitudes",
     "painPoints": ["pain point 1", "pain point 2", "pain point 3"],
     "goals": ["goal 1", "goal 2", "goal 3"]
-  }}
-}}
+  }
+}`;
 
-IMPORTANT: Return ONLY valid JSON. No markdown, no explanations, no additional text.
-`);
+    const userPrompt = `Develop a comprehensive brand extension strategy for:
 
-    // Create output parser for JSON
-    const parser = new JsonOutputParser<BrandExtensionOutput>();
+Current Brand: ${currentBrand}
+Core Strengths: ${coreStrength}
+Target Category: ${targetCategory}
+Additional Instructions From User (if any, incorporate these into the strategy - if empty, ignore): ${customInstructions?.trim() || 'None provided'}
 
-    // Create the chain
-    const chain = promptTemplate.pipe(model).pipe(parser);
+Analyze the brand's core strengths and how they translate to the new category, create a compelling brand extension name that maintains brand equity, conduct a thorough SWOT analysis specific to this extension, develop an AIDA framework for market entry, and define the target persona with precision. If additional instructions were provided, make sure the strategy specifically reflects them.`;
 
-    // Execute the chain
-    const result = await chain.invoke({
-      currentBrand,
-      coreStrength,
-      targetCategory,
+    const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.7,
+        max_tokens: 2000,
+        response_format: { type: 'json_object' },
+      }),
     });
 
-    // Return successful response
-    return NextResponse.json(
-      {
-        success: true,
-        data: result,
-        metadata: {
-          brand: currentBrand,
-          category: targetCategory,
-          model: 'ibm/granite-4-h-small',
-          timestamp: new Date().toISOString(),
-        },
-      },
-      { status: 200 }
-    );
-  } catch (error: any) {
-    console.error('Error in brand extension generation:', error);
+    const groqData = await groqResponse.json();
 
-    // Handle specific error types
-    if (error.message?.includes('API key') || error.message?.includes('authentication')) {
+    if (!groqResponse.ok) {
+      const message = groqData?.error?.message || 'Failed to generate strategy';
       return NextResponse.json(
-        {
-          error: 'Configuration Error',
-          details: 'IBM watsonx.ai API key is not configured or invalid. Please check WATSONX_API_KEY in environment variables.',
-        },
+        { error: 'Groq API Error', details: message },
+        { status: groqResponse.status }
+      );
+    }
+
+    const rawContent = groqData?.choices?.[0]?.message?.content;
+
+    if (!rawContent) {
+      return NextResponse.json(
+        { error: 'Generation Error', details: 'No content was returned from the model.' },
         { status: 500 }
       );
     }
 
-    if (error.message?.includes('project') || error.message?.includes('PROJECT_ID')) {
-      return NextResponse.json(
-        {
-          error: 'Configuration Error',
-          details: 'IBM watsonx.ai Project ID is not configured. Please set WATSONX_PROJECT_ID in environment variables.',
-        },
-        { status: 500 }
-      );
-    }
-
-    if (error.message?.includes('JSON')) {
+    let result;
+    try {
+      result = JSON.parse(rawContent);
+    } catch {
       return NextResponse.json(
         {
           error: 'Parsing Error',
@@ -159,7 +109,21 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no explanations, no additional t
       );
     }
 
-    // Generic error response
+    return NextResponse.json(
+      {
+        success: true,
+        data: result,
+        metadata: {
+          brand: currentBrand,
+          category: targetCategory,
+          model: 'llama-3.3-70b-versatile',
+          timestamp: new Date().toISOString(),
+        },
+      },
+      { status: 200 }
+    );
+  } catch (error: any) {
+    console.error('Error in brand extension generation:', error);
     return NextResponse.json(
       {
         error: 'Internal Server Error',
@@ -170,13 +134,9 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no explanations, no additional t
   }
 }
 
-// Handle unsupported methods
 export async function GET() {
   return NextResponse.json(
-    {
-      error: 'Method Not Allowed',
-      details: 'This endpoint only accepts POST requests',
-    },
+    { error: 'Method Not Allowed', details: 'This endpoint only accepts POST requests' },
     { status: 405 }
   );
 }
